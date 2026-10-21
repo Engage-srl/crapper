@@ -542,3 +542,8 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
     monkeypatch.setattr("crapper.runners.run_shell", shell)
     assert _ensure_vitest_coverage(tmp_path) is False
     assert package_json.read_bytes() == b'{"name":"demo"}\n'
+
+
+def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
+    module = tmp_path / "carddav.py"
+    assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"

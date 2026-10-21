@@ -361,8 +361,16 @@ def python_sources(package: Path, files: list[Path]) -> str:
             relative = path.resolve().relative_to(package)
         except ValueError:
             continue
-        tops.add(relative.parts[0])
+        tops.add(_source_name(relative))
     return ",".join(sorted(tops))
+
+
+def _source_name(relative: Path) -> str:
+    """A top-level module is named without .py, which coverage.py --source requires."""
+
+    if len(relative.parts) == 1:
+        return relative.stem
+    return relative.parts[0]
 
 
 def python_coverage_commands(
