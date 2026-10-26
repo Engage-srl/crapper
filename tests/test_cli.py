@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from crapper.cli import GitError, _changed_files, _positionals, _take, main, parse_args, run
-from crapper.discover import is_test_file, language_of
+from crapper.discover import is_test_file, iter_source_files, language_of
 
 
 def test_language_detection():
@@ -399,3 +399,25 @@ def test_main_exits_with_the_status(monkeypatch):
         assert exc.code == 4
     else:
         raise AssertionError("main did not exit")
+
+
+def test_kotlin_files_are_detected():
+    assert language_of("Board.kt") == "kotlin"
+    assert language_of("build.gradle.kts") is None
+
+
+def test_claude_worktrees_are_skipped(tmp_path):
+    hidden = tmp_path / ".claude" / "worktrees" / "x" / "src" / "A.kt"
+    hidden.parent.mkdir(parents=True)
+    hidden.write_text("fun a() {\n}\n", encoding="utf-8")
+    kept = tmp_path / "src" / "B.kt"
+    kept.parent.mkdir(parents=True)
+    kept.write_text("fun b() {\n}\n", encoding="utf-8")
+    assert iter_source_files([tmp_path]) == [kept.resolve()]
+
+
+def test_help_mentions_kotlin():
+    from crapper.cli import HELP
+
+    assert "Kotlin (.kt)" in HELP
+    assert "package.FileKt" in HELP

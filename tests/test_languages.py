@@ -9,6 +9,7 @@ _SOURCES = [
     ("typescript", "export function view() { return 1 }\n", "src/ui.ts", "view"),
     ("python", "def run():\n    return 1\n", "src/app.py", "run"),
     ("rust", "pub fn open() {}\n", "src/lib.rs", "open"),
+    ("kotlin", "package a\n\nfun place() {\n    if (true) return\n}\n", "src/a/Board.kt", "place"),
 ]
 
 

@@ -416,10 +416,13 @@ def _languages_in(files: list[Path]) -> set[str]:
     return found
 
 
-def _modules_with(files: list[Path], suffix: str, marker: str, root: Path) -> list[Path]:
+def _modules_with(
+    files: list[Path], suffix: str | tuple[str, ...], marker: str, root: Path
+) -> list[Path]:
+    suffixes = (suffix,) if isinstance(suffix, str) else suffix
     modules: set[Path] = set()
     for file in files:
-        if Path(file).suffix != suffix:
+        if Path(file).suffix not in suffixes:
             continue
         module = _nearest(file, marker, root)
         if module is not None:
@@ -441,7 +444,7 @@ def _cover_clojure(root: Path) -> None:
 
 
 def _cover_java(root: Path, files: list[Path]) -> None:
-    modules = _modules_with(files, ".java", "pom.xml", root)
+    modules = _modules_with(files, (".java", ".kt"), "pom.xml", root)
     if not modules:
         _warn("No pom.xml; skipping Java coverage.")
         return
@@ -583,7 +586,7 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     languages = _languages_in(files)
     if "clojure" in languages:
         _cover_clojure(root)
-    if "java" in languages:
+    if languages & {"java", "kotlin"}:
         _cover_java(root, files)
     if "go" in languages:
         _cover_go(root, files)
