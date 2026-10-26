@@ -547,3 +547,23 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
 def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
     module = tmp_path / "carddav.py"
     assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"
+
+
+def _maven_commands(tmp_path, monkeypatch, files):
+    commands = []
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: commands.append(command) or 0)
+    run_coverage(tmp_path, files, None)
+    return [command for command in commands if _as_text(command).startswith("mvn")]
+
+
+def test_kotlin_only_module_runs_maven(tmp_path, monkeypatch):
+    _write(tmp_path, "pom.xml", "<project></project>\n")
+    kt = _write(tmp_path, "src/main/kotlin/Board.kt", "fun place() {\n}\n")
+    assert len(_maven_commands(tmp_path, monkeypatch, [kt])) == 1
+
+
+def test_mixed_module_runs_maven_once(tmp_path, monkeypatch):
+    _write(tmp_path, "pom.xml", "<project></project>\n")
+    kt = _write(tmp_path, "src/main/kotlin/Board.kt", "fun place() {\n}\n")
+    java = _write(tmp_path, "src/main/java/App.java", "class App {}\n")
+    assert len(_maven_commands(tmp_path, monkeypatch, [kt, java])) == 1
