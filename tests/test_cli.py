@@ -414,3 +414,10 @@ def test_claude_worktrees_are_skipped(tmp_path):
     kept.parent.mkdir(parents=True)
     kept.write_text("fun b() {\n}\n", encoding="utf-8")
     assert iter_source_files([tmp_path]) == [kept.resolve()]
+
+
+def test_help_mentions_kotlin():
+    from crapper.cli import HELP
+
+    assert "Kotlin (.kt)" in HELP
+    assert "package.FileKt" in HELP
