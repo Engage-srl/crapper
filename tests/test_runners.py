@@ -19,6 +19,8 @@ from crapper.runners import (
     _restore_manifests,
     _rust_kind,
     _vitest_version,
+    gradle_command,
+    gradle_modules,
     python_coverage_commands,
     python_roots,
     python_sources,
@@ -293,6 +295,109 @@ def test_missing_build_files_skip_that_language(tmp_path, monkeypatch):
         _write(tmp_path, "src/lib.rs", "pub fn open() {}\n"),
     ]
     run_coverage(tmp_path, files, None)
+
+
+def test_java_without_a_build_file_names_both_build_tools(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    run_coverage(tmp_path, [_write(tmp_path, "src/App.java", "class App {}\n")], None)
+    assert "No pom.xml or build.gradle; skipping Java coverage." in capsys.readouterr().err
+
+
+def _java_modules(tmp_path: Path) -> list[Path]:
+    """One module per layout: Groovy Gradle, Kotlin Gradle, Maven, and both."""
+
+    _write(tmp_path, "groovy/build.gradle", "")
+    _write(tmp_path, "kts/build.gradle.kts", "")
+    _write(tmp_path, "maven/pom.xml", "<project></project>\n")
+    _write(tmp_path, "both/pom.xml", "<project></project>\n")
+    _write(tmp_path, "both/build.gradle", "")
+    return [
+        _write(tmp_path, f"{module}/src/demo/A.java", "class A {}\n")
+        for module in ("groovy", "kts", "maven", "both")
+    ]
+
+
+def test_gradle_modules_are_java_files_whose_nearest_build_file_is_gradle(tmp_path):
+    files = _java_modules(tmp_path)
+    files.append(_write(tmp_path, "groovy/web/app.ts", "export const n = 1\n"))
+    files.append(_write(tmp_path, "loose/B.java", "class B {}\n"))
+    assert gradle_modules(tmp_path, files) == [tmp_path / "groovy", tmp_path / "kts"]
+
+
+def test_a_gradle_module_below_a_maven_parent_is_still_gradle(tmp_path):
+    _write(tmp_path, "pom.xml", "<project></project>\n")
+    _write(tmp_path, "app/build.gradle", "")
+    files = [_write(tmp_path, "app/src/A.java", "class A {}\n")]
+    assert gradle_modules(tmp_path, files) == [tmp_path / "app"]
+
+
+def test_java_coverage_runs_maven_or_gradle_and_prefers_maven(tmp_path, monkeypatch):
+    calls: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        "crapper.runners.run_shell",
+        lambda command, cwd: calls.append((Path(command[0]).name, cwd)) or 0,
+    )
+    run_coverage(tmp_path, _java_modules(tmp_path), None)
+    assert sorted(calls) == [
+        ("gradle", tmp_path / "groovy"),
+        ("gradle", tmp_path / "kts"),
+        ("mvn", tmp_path / "both"),
+        ("mvn", tmp_path / "maven"),
+    ]
+
+
+def test_gradle_command_prefers_the_wrapper_and_passes_the_init_script(tmp_path):
+    init = tmp_path / "jacoco.gradle"
+    module = tmp_path / "app"
+    module.mkdir()
+    assert gradle_command(module, tmp_path, init) == [
+        "gradle",
+        "--init-script",
+        str(init),
+        "test",
+        "jacocoTestReport",
+    ]
+    _write(tmp_path, "gradlew", "#!/bin/sh\n")
+    assert gradle_command(module, tmp_path, init)[0] == str(tmp_path / "gradlew")
+    _write(module, "gradlew", "#!/bin/sh\n")
+    command = gradle_command(module, tmp_path, init)
+    assert isinstance(command, list)
+    assert command[0] == str(module / "gradlew")
+
+
+def test_gradle_run_applies_jacoco_through_a_temporary_init_script(tmp_path, monkeypatch):
+    seen: list[str] = []
+    scripts: list[Path] = []
+
+    def shell(command, cwd):
+        script = Path(command[command.index("--init-script") + 1])
+        scripts.append(script)
+        seen.append(script.read_text(encoding="utf-8"))
+        return 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    _write(tmp_path, "build.gradle", "")
+    run_coverage(tmp_path, [_write(tmp_path, "src/A.java", "class A {}\n")], None)
+    assert len(seen) == 1
+    assert "allprojects" in seen[0]
+    assert "apply plugin: 'jacoco'" in seen[0]
+    assert "tasks.withType(JacocoReport)" in seen[0]
+    assert "xml.required = true" in seen[0]
+    assert not scripts[0].exists()
+    assert not (tmp_path / "init.gradle").exists()
+
+
+def test_gradle_cleans_only_its_stale_report_and_warns_on_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
+    _write(tmp_path, "build.gradle.kts", "")
+    report = _write(tmp_path, "build/reports/jacoco/test/jacocoTestReport.xml", "<report/>")
+    html = _write(tmp_path, "build/reports/jacoco/test/html/index.html", "<html/>")
+    classes = _write(tmp_path, "build/classes/java/main/A.class", "x")
+    exec_file = _write(tmp_path, "build/jacoco/test.exec", "x")
+    run_coverage(tmp_path, [_write(tmp_path, "src/A.java", "class A {}\n")], None)
+    assert not report.exists()
+    assert html.exists() and classes.exists() and exec_file.exists()
+    assert f"Java coverage exited 1 in {tmp_path}. Java coverage will score 0%." in capsys.readouterr().err
 
 
 def test_run_shell_returns_the_child_status_and_reports_a_failed_start(tmp_path, monkeypatch, capsys):
