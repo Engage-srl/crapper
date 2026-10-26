@@ -1,9 +1,9 @@
 """Kotlin functions and cyclomatic complexity, following java.py.
 
 Every `fun` with a body is an entry: top-level, member, extension, and inside
-`object` / `companion object`. Local functions, lambdas, and anonymous
-objects stay inside the enclosing function. Secondary constructors and `init`
-blocks are omitted, as Java omits constructors.
+`object` / `companion object`. Local functions and lambdas stay inside the
+enclosing function. Secondary constructors and `init` blocks are omitted, as
+Java omits constructors.
 
 `:namespace` is the class JaCoCo reports, written with dots
 (`pkg.Outer.Inner`, `pkg.Class.Companion`), and `pkg.FileNameKt` (or the
