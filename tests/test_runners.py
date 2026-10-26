@@ -300,7 +300,7 @@ def test_missing_build_files_skip_that_language(tmp_path, monkeypatch):
 def test_java_without_a_build_file_names_both_build_tools(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
     run_coverage(tmp_path, [_write(tmp_path, "src/App.java", "class App {}\n")], None)
-    assert "No pom.xml or build.gradle; skipping Java coverage." in capsys.readouterr().err
+    assert "No pom.xml or build.gradle; skipping Java and Kotlin coverage." in capsys.readouterr().err
 
 
 def _java_modules(tmp_path: Path) -> list[Path]:
@@ -475,7 +475,7 @@ def test_gradle_cleans_only_its_stale_report_and_warns_on_failure(tmp_path, monk
     run_coverage(tmp_path, [_write(tmp_path, "src/A.java", "class A {}\n")], None)
     assert not report.exists()
     assert html.exists() and classes.exists() and exec_file.exists()
-    assert f"Java coverage exited 1 in {tmp_path}. Java coverage will score 0%." in capsys.readouterr().err
+    assert f"JaCoCo coverage exited 1 in {tmp_path}. Java and Kotlin coverage will score 0%." in capsys.readouterr().err
 
 
 def test_run_shell_returns_the_child_status_and_reports_a_failed_start(tmp_path, monkeypatch, capsys):
@@ -730,3 +730,25 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
 def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
     module = tmp_path / "carddav.py"
     assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"
+
+
+def test_kotlin_files_run_the_gradle_build_once_with_java(tmp_path, monkeypatch):
+    _write(tmp_path, "build.gradle.kts", "")
+    files = [
+        _write(tmp_path, "src/main/kotlin/demo/App.kt", "class App\n"),
+        _write(tmp_path, "src/main/java/demo/Util.java", "class Util {}\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [("gradle", tmp_path)]
+
+
+def test_kotlin_files_alone_run_maven_or_gradle(tmp_path, monkeypatch):
+    _write(tmp_path, "app/build.gradle.kts", "")
+    _write(tmp_path, "lib/pom.xml", "<project></project>\n")
+    files = [
+        _write(tmp_path, "app/src/main/kotlin/App.kt", "class App\n"),
+        _write(tmp_path, "lib/src/main/kotlin/Lib.kt", "class Lib\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [
+        ("gradle", tmp_path / "app"),
+        ("mvn", tmp_path / "lib"),
+    ]

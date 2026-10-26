@@ -24,6 +24,7 @@ _MAVEN = [
     "org.jacoco:jacoco-maven-plugin:0.8.12:report",
 ]
 
+_JVM_SUFFIXES = (".java", ".kt")
 _GRADLE_BUILD_FILES = ("build.gradle", "build.gradle.kts")
 _GRADLE_SETTINGS_FILES = ("settings.gradle", "settings.gradle.kts")
 _GRADLE_REPORT = Path("build/reports/jacoco/test/jacocoTestReport.xml")
@@ -308,7 +309,7 @@ def rust_modules(root: Path, files: list[Path]) -> list[Path]:
     root = root.resolve()
     return [
         module.resolve()
-        for module in _modules_with(files, ".rs", "Cargo.toml", root)
+        for module in _modules_with(files, (".rs",), "Cargo.toml", root)
     ]
 
 
@@ -433,10 +434,12 @@ def _languages_in(files: list[Path]) -> set[str]:
     return found
 
 
-def _modules_with(files: list[Path], suffix: str, marker: str, root: Path) -> list[Path]:
+def _modules_with(
+    files: list[Path], suffixes: tuple[str, ...], marker: str, root: Path
+) -> list[Path]:
     modules: set[Path] = set()
     for file in files:
-        if Path(file).suffix != suffix:
+        if Path(file).suffix not in suffixes:
             continue
         module = _nearest(file, marker, root)
         if module is not None:
@@ -451,14 +454,14 @@ def _nearest_gradle(file: Path, root: Path) -> Path | None:
 
 
 def gradle_modules(root: Path, files: list[Path]) -> list[Path]:
-    """Modules for Java files whose nearest build file is Gradle's.
+    """Modules for Java and Kotlin files whose nearest build file is Gradle's.
 
     A directory with both pom.xml and a Gradle build file is a Maven module.
     """
 
     modules: set[Path] = set()
     for file in files:
-        if Path(file).suffix != ".java":
+        if Path(file).suffix not in _JVM_SUFFIXES:
             continue
         module = _nearest_gradle(file, root)
         if module is None:
@@ -516,14 +519,20 @@ def _cover_clojure(root: Path) -> None:
         _warn(f"Clojure coverage exited {code}. Clojure coverage will score 0%.")
 
 
-def _cover_java(root: Path, files: list[Path]) -> None:
-    modules = _modules_with(files, ".java", "pom.xml", root)
+def _cover_jvm(root: Path, files: list[Path]) -> None:
+    """Java and Kotlin share one JaCoCo run per module."""
+
+    modules = _modules_with(files, _JVM_SUFFIXES, "pom.xml", root)
     gradle = gradle_modules(root, files)
     if not modules and not gradle:
-        _warn("No pom.xml or build.gradle; skipping Java coverage.")
+        _warn("No pom.xml or build.gradle; skipping Java and Kotlin coverage.")
         return
     _cover_maven(modules)
     _cover_gradle(root, gradle)
+
+
+def _jvm_failure(code: int, module: Path) -> str:
+    return f"JaCoCo coverage exited {code} in {module}. Java and Kotlin coverage will score 0%."
 
 
 def _cover_maven(modules: list[Path]) -> None:
@@ -534,7 +543,7 @@ def _cover_maven(modules: list[Path]) -> None:
             exec_file.unlink()
         code = run_shell(_MAVEN, module)
         if code != 0:
-            _warn(f"Java coverage exited {code} in {module}. Java coverage will score 0%.")
+            _warn(_jvm_failure(code, module))
 
 
 def _cover_gradle(root: Path, modules: list[Path]) -> None:
@@ -547,11 +556,11 @@ def _cover_gradle(root: Path, modules: list[Path]) -> None:
             (module / _GRADLE_REPORT).unlink(missing_ok=True)
             code = run_shell(gradle_command(module, root, init_script), module)
             if code != 0:
-                _warn(f"Java coverage exited {code} in {module}. Java coverage will score 0%.")
+                _warn(_jvm_failure(code, module))
 
 
 def _cover_go(root: Path, files: list[Path]) -> None:
-    modules = _modules_with(files, ".go", "go.mod", root)
+    modules = _modules_with(files, (".go",), "go.mod", root)
     if not modules:
         _warn("No go.mod; skipping Go coverage.")
         return
@@ -678,8 +687,8 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     languages = _languages_in(files)
     if "clojure" in languages:
         _cover_clojure(root)
-    if "java" in languages:
-        _cover_java(root, files)
+    if languages & {"java", "kotlin"}:
+        _cover_jvm(root, files)
     if "go" in languages:
         _cover_go(root, files)
     if "typescript" in languages:
