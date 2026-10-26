@@ -346,6 +346,84 @@ def test_java_coverage_runs_maven_or_gradle_and_prefers_maven(tmp_path, monkeypa
     ]
 
 
+def _gradle_runs(tmp_path: Path, monkeypatch, files: list[Path]) -> list[tuple[str, Path]]:
+    calls: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        "crapper.runners.run_shell",
+        lambda command, cwd: calls.append((Path(command[0]).name, cwd)) or 0,
+    )
+    run_coverage(tmp_path, files, None)
+    return sorted(calls)
+
+
+def test_a_subproject_inside_a_selected_gradle_build_runs_with_it(tmp_path, monkeypatch):
+    _write(tmp_path, "settings.gradle", "include 'app'\n")
+    _write(tmp_path, "build.gradle", "")
+    _write(tmp_path, "app/build.gradle", "")
+    files = [
+        _write(tmp_path, "src/main/java/demo/Root.java", "class Root {}\n"),
+        _write(tmp_path, "app/src/main/java/demo/App.java", "class App {}\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [("gradle", tmp_path)]
+
+
+def test_sibling_gradle_subprojects_each_run_once(tmp_path, monkeypatch):
+    _write(tmp_path, "settings.gradle", "include 'app', 'lib'\n")
+    _write(tmp_path, "build.gradle", "")
+    _write(tmp_path, "app/build.gradle", "")
+    _write(tmp_path, "lib/build.gradle", "")
+    files = [
+        _write(tmp_path, "app/src/main/java/demo/App.java", "class App {}\n"),
+        _write(tmp_path, "lib/src/main/java/demo/Lib.java", "class Lib {}\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [
+        ("gradle", tmp_path / "app"),
+        ("gradle", tmp_path / "lib"),
+    ]
+
+
+def test_a_nested_gradle_build_with_its_own_settings_still_runs(tmp_path, monkeypatch):
+    _write(tmp_path, "settings.gradle", "")
+    _write(tmp_path, "build.gradle", "")
+    _write(tmp_path, "tools/settings.gradle", "")
+    _write(tmp_path, "tools/plugin/build.gradle", "")
+    files = [
+        _write(tmp_path, "src/main/java/demo/Root.java", "class Root {}\n"),
+        _write(tmp_path, "tools/plugin/src/main/java/demo/Plugin.java", "class Plugin {}\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [
+        ("gradle", tmp_path),
+        ("gradle", tmp_path / "tools" / "plugin"),
+    ]
+
+
+def test_without_a_settings_file_each_gradle_module_is_its_own_build(tmp_path, monkeypatch):
+    _write(tmp_path, "build.gradle", "")
+    _write(tmp_path, "app/build.gradle", "")
+    files = [
+        _write(tmp_path, "src/main/java/demo/Root.java", "class Root {}\n"),
+        _write(tmp_path, "app/src/main/java/demo/App.java", "class App {}\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [
+        ("gradle", tmp_path),
+        ("gradle", tmp_path / "app"),
+    ]
+
+
+def test_kotlin_build_and_settings_files_group_subprojects_the_same_way(tmp_path, monkeypatch):
+    _write(tmp_path, "settings.gradle.kts", 'include("app")\n')
+    _write(tmp_path, "build.gradle.kts", "")
+    _write(tmp_path, "app/build.gradle.kts", "")
+    _write(tmp_path, "nested/settings.gradle.kts", "")
+    _write(tmp_path, "nested/build.gradle.kts", "")
+    files = [
+        _write(tmp_path, "src/main/java/demo/Root.java", "class Root {}\n"),
+        _write(tmp_path, "app/src/main/java/demo/App.java", "class App {}\n"),
+        _write(tmp_path, "nested/src/main/java/demo/Nested.java", "class Nested {}\n"),
+    ]
+    assert gradle_modules(tmp_path, files) == [tmp_path, tmp_path / "nested"]
+
+
 def test_gradle_command_prefers_the_wrapper_and_passes_the_init_script(tmp_path):
     init = tmp_path / "jacoco.gradle"
     module = tmp_path / "app"

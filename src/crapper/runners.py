@@ -25,6 +25,7 @@ _MAVEN = [
 ]
 
 _GRADLE_BUILD_FILES = ("build.gradle", "build.gradle.kts")
+_GRADLE_SETTINGS_FILES = ("settings.gradle", "settings.gradle.kts")
 _GRADLE_REPORT = Path("build/reports/jacoco/test/jacocoTestReport.xml")
 # Applied from outside the build, like the Maven goals, so the project's
 # build file needs no change.
@@ -465,7 +466,33 @@ def gradle_modules(root: Path, files: list[Path]) -> list[Path]:
         maven = _nearest(file, "pom.xml", root)
         if maven is None or len(module.parts) > len(maven.parts):
             modules.add(module)
-    return sorted(modules)
+    return [module for module in sorted(modules) if not _runs_inside(module, modules)]
+
+
+def _gradle_build(module: Path) -> Path | None:
+    """The directory whose settings file puts this module in a multi-project build."""
+
+    for directory in (module, *module.parents):
+        if any((directory / name).is_file() for name in _GRADLE_SETTINGS_FILES):
+            return directory
+    return None
+
+
+def _runs_inside(module: Path, modules: set[Path]) -> bool:
+    """True when a selected module above this one, in the same build, runs its tests.
+
+    Gradle runs a task in the current project and every project below it. A
+    settings file starts a separate build, which an outer run does not enter,
+    and without one a module is a build of its own.
+    """
+
+    build = _gradle_build(module)
+    if build is None:
+        return False
+    return any(
+        outer != module and module.is_relative_to(outer) and outer.is_relative_to(build)
+        for outer in modules
+    )
 
 
 def gradle_command(module: Path, root: Path, init_script: Path) -> list[str]:
