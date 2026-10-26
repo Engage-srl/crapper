@@ -12,6 +12,7 @@ given by `@file:JvmName`). Nested types become their own namespace
 coverage lookup.
 """
 
+import re
 from pathlib import Path
 
 from crapper.languages.treesitter import (
@@ -23,7 +24,7 @@ from crapper.languages.treesitter import (
 )
 from crapper.model import Function
 
-_NAMED_TYPES = {"class_declaration", "object_declaration", "companion_object"}
+_NAMED_TYPES = {"class_declaration", "object_declaration", "companion_object", "enum_entry"}
 _SKIPPED_TYPES = _NAMED_TYPES | {"object_literal"}
 _EXECUTABLES = {
     "function_declaration",
@@ -41,6 +42,7 @@ _DECISIONS = {
     "catch_block",
     "elvis_expression",
 }
+_IS_PROPERTY = re.compile(r"is[^a-z]")
 _LOGIC = {"conjunction_expression": "&&", "disjunction_expression": "||"}
 
 
@@ -123,7 +125,7 @@ def _walk(node):
 
 
 def _type_name(data: bytes, node) -> str:
-    ident = child_of_type(node, "type_identifier")
+    ident = child_of_type(node, "type_identifier", "simple_identifier")
     if ident is not None:
         return node_text(data, ident)
     return "Companion"
@@ -160,6 +162,8 @@ def _accessor_name(data: bytes, node) -> str | None:
     if ident is None:
         return None
     prop = node_text(data, ident)
+    if _IS_PROPERTY.match(prop):
+        return prop if node.type == "getter" else "set" + prop[2:]
     prefix = "get" if node.type == "getter" else "set"
     return prefix + prop[:1].upper() + prop[1:]
 
@@ -175,6 +179,13 @@ def _entry_name(data: bytes, node) -> str | None:
     return node_text(data, ident) if ident is not None else None
 
 
+def _file_class(path: str) -> str:
+    """kotlinc's facade class: `main.kt` is `MainKt`, `my-file.kt` is `My_fileKt`."""
+
+    stem = re.sub(r"\W", "_", Path(path).stem)
+    return f"{stem[:1].upper()}{stem[1:]}Kt"
+
+
 def _qualify(package: str | None, names: list[str], nested: str) -> str:
     body = nested.join(names)
     return f"{package}.{body}" if package else body
@@ -185,7 +196,7 @@ class _File:
         self.data = data
         self.path = path
         self.package = _package_name(data, root)
-        self.file_class = _jvm_name(data, root) or f"{Path(path).stem}Kt"
+        self.file_class = _jvm_name(data, root) or _file_class(path)
 
     def function(self, node, name: str) -> Function:
         names = _type_chain(self.data, node) or [self.file_class]

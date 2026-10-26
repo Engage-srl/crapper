@@ -6,13 +6,18 @@ Kotlin compiles one function into several JVM methods, and renames some:
 - interface bodies live in `Iface$DefaultImpls`;
 - `internal` functions become `name$module`, functions taking a value class
   become `name-hash`;
-- each lambda becomes `name$lambda$N` (`name$lambda-N` before Kotlin 1.8),
-  and nested lambdas `name$lambda$N$lambda$M`;
+- each lambda becomes a method `name$lambda$N` (`name$lambda-N` before
+  Kotlin 1.8; nested `name$lambda$N$lambda$M`), or, before Kotlin 2.0, a class
+  `Outer$name$N` (nested `Outer$name$N$M`) whose code is in `invoke`;
 - default arguments add a synthetic `name$default`, which JaCoCo keeps.
 
 The function's coverage is its own method plus its lambdas, because its
-complexity counts the decisions inside those lambdas.
+complexity counts the decisions inside those lambdas. Anonymous objects also
+compile to `Outer$name$N`; only methods inside the function's lines are added.
 """
+
+import re
+from dataclasses import dataclass, field
 
 from crapper.model import Function
 
@@ -28,20 +33,35 @@ def _candidate_classes(function: Function) -> list[str]:
     return names
 
 
-def by_class(index) -> dict[str, list[tuple[str, object]]]:
-    """Regroup a JaCoCo index (`class#method` keys) as `{class: [(method, JacocoMethod)]}`."""
+_LAMBDA_CLASS = re.compile(r"^(.*?)\$([^$\d][^$]*)\$\d+(?:\$.*)?$")
 
-    classes: dict[str, list[tuple[str, object]]] = {}
+
+@dataclass
+class KotlinIndex:
+    """A JaCoCo index regrouped for Kotlin lookups."""
+
+    methods: dict[str, list[tuple[str, object]]] = field(default_factory=dict)
+    # `(outer class, function name)` -> methods of its lambda classes
+    lambda_classes: dict[tuple[str, str], list[object]] = field(default_factory=dict)
+
+
+def by_class(index) -> KotlinIndex:
+    """Regroup a JaCoCo index (`class#method` keys) by class and by lambda class."""
+
+    found = KotlinIndex()
     for key, methods in index.items():
         class_name, method_name = key.split("#", 1)
-        classes.setdefault(class_name, []).extend((method_name, each) for each in methods)
-    return classes
+        found.methods.setdefault(class_name, []).extend((method_name, each) for each in methods)
+        match = _LAMBDA_CLASS.match(class_name)
+        if match:
+            found.lambda_classes.setdefault(match.groups(), []).extend(methods)
+    return found
 
 
-def _methods_named(classes, class_name: str, name: str):
+def _methods_named(classes: KotlinIndex, class_name: str, name: str):
     """Every `(method name, JacocoMethod)` of `class_name` starting with `name`."""
 
-    for method_name, method in classes.get(class_name, []):
+    for method_name, method in classes.methods.get(class_name, []):
         if method_name.startswith(name):
             yield method_name, method
 
@@ -76,6 +96,9 @@ def _lambdas(classes, class_name: str, function: Function):
         if suffix.startswith(_LAMBDA_MARKERS) and (
             function.start_line <= method.line <= function.end_line
         ):
+            yield method
+    for method in classes.lambda_classes.get((class_name, function.name), []):
+        if function.start_line <= method.line <= function.end_line:
             yield method
 
 

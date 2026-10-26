@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote
 
-from crapper.kotlin_coverage import by_class, kotlin_percent
+from crapper.kotlin_coverage import KotlinIndex, by_class, kotlin_percent
 from crapper.model import Function
 
 _SPAN = re.compile(
@@ -426,7 +426,7 @@ class CoverageBundle:
     jacoco: dict[str, list[JacocoMethod]] | None = None
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
-    kotlin_classes: dict | None = None
+    kotlin_classes: KotlinIndex | None = None
 
     def bind_sources(self, paths: list[str]) -> None:
         """Remember project files so a short path cannot take a longer file's report."""

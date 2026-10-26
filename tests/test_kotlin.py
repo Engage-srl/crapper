@@ -203,3 +203,51 @@ def test_no_package_and_keywords_in_strings():
 def test_each_chained_operator_is_a_decision():
     source = "fun g(a: Boolean, b: Boolean, c: Boolean) {\n    if (a && b && c || a || b) {\n    }\n}\n"
     assert _rows(functions_in_source(source, "G.kt"), "name", "complexity") == [("g", 6)]
+
+
+def test_is_properties_keep_their_jvm_accessor_names():
+    source = """
+package a
+
+class Door {
+    var isOpen: Boolean = false
+        get() = field
+        set(value) {
+            field = value
+        }
+}
+"""
+    found = functions_in_source(source, "src/a/Door.kt")
+    assert _rows(found, "name") == [("isOpen",), ("setOpen",)]
+
+
+def test_enum_entry_bodies_are_their_own_class():
+    source = """
+package a
+
+enum class Hold {
+    OUTBOUND {
+        override fun next(): Int {
+            return 1
+        }
+    },
+    INBOUND {
+        override fun next(): Int {
+            return 2
+        }
+    };
+
+    abstract fun next(): Int
+}
+"""
+    found = functions_in_source(source, "src/a/Hold.kt")
+    assert _rows(found, "namespace", "name", "jacoco_class") == [
+        ("a.Hold.OUTBOUND", "next", "a.Hold$OUTBOUND"),
+        ("a.Hold.INBOUND", "next", "a.Hold$INBOUND"),
+    ]
+
+
+def test_file_class_is_capitalized_and_sanitized():
+    source = "package a\n\nfun main() {\n}\n"
+    assert _rows(functions_in_source(source, "src/a/main.kt"), "jacoco_class") == [("a.MainKt",)]
+    assert _rows(functions_in_source(source, "src/a/my-file.kt"), "jacoco_class") == [("a.My_fileKt",)]

@@ -112,3 +112,27 @@ def test_bundle_routes_kotlin_to_kotlin_lookup():
     )
     bundle = CoverageBundle(jacoco=parse_jacoco_index(xml))
     assert bundle.percent_for(kotlin("place", 10, 15)) == 50.0
+
+
+def test_lambda_classes_add_to_their_function():
+    index = jacoco(
+        {
+            "demo/Board": [("place", 10, 0, 4)],
+            "demo/Board$place$1": [("invoke", 12, 4, 0)],
+            "demo/Board$place$1$1": [("invoke", 13, 0, 8)],
+            "demo/Board$place$2": [("invoke", 40, 100, 0)],
+            "demo/Board$placeAll$1": [("invoke", 12, 100, 0)],
+        }
+    )
+    assert kotlin_percent(index, kotlin("place", 10, 15)) == 75.0
+
+
+def test_lambda_classes_of_a_companion_function():
+    index = jacoco(
+        {
+            "demo/Board$Companion": [("make", 3, 0, 2)],
+            "demo/Board$Companion$make$1": [("invoke", 4, 2, 0)],
+        }
+    )
+    function = kotlin("make", 3, 5, jacoco_class="demo.Board$Companion")
+    assert kotlin_percent(index, function) == 50.0
