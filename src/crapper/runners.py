@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from crapper.dart_coverage import dart_command, rewrite_report
 from crapper.discover import is_test_file, language_of
 
 _MAVEN = [
@@ -565,6 +566,24 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
+def _cover_dart(root: Path, files: list[Path]) -> None:
+    packages = _modules_with(files, ".dart", "pubspec.yaml", root)
+    if not packages:
+        _warn("No pubspec.yaml; skipping Dart coverage.")
+        return
+    for package in packages:
+        report = _coverage_report(root, package, "dart")
+        command = dart_command(package, report)
+        if shutil.which(command[0]) is None:
+            _warn(f"{command[0]} is not on PATH. Dart coverage will score 0% in {package}.")
+            continue
+        _prepare_report(report)
+        code = run_shell(command, package)
+        if code != 0:
+            _warn(f"Dart coverage exited {code} in {package}. Coverage was kept if written.")
+        rewrite_report(report, package)
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -596,4 +615,6 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         _cover_python(root, files)
     if "rust" in languages:
         _cover_rust(root, files)
+    if "dart" in languages:
+        _cover_dart(root, files)
     return 0
