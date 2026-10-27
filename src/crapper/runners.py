@@ -584,6 +584,15 @@ def _cover_dart(root: Path, files: list[Path]) -> None:
         rewrite_report(report, package)
 
 
+_PER_MODULE = (
+    ("go", _cover_go),
+    ("typescript", _cover_typescript),
+    ("python", _cover_python),
+    ("rust", _cover_rust),
+    ("dart", _cover_dart),
+)
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -607,14 +616,7 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         _cover_clojure(root)
     if languages & {"java", "kotlin"}:
         _cover_java(root, files)
-    if "go" in languages:
-        _cover_go(root, files)
-    if "typescript" in languages:
-        _cover_typescript(root, files)
-    if "python" in languages:
-        _cover_python(root, files)
-    if "rust" in languages:
-        _cover_rust(root, files)
-    if "dart" in languages:
-        _cover_dart(root, files)
+    for language, cover in _PER_MODULE:
+        if language in languages:
+            cover(root, files)
     return 0
