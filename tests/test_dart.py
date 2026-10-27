@@ -213,3 +213,14 @@ def test_dart_broken_source_does_not_raise(tmp_path):
     assert "b" in names
     unparsable = "int a( {\n  return 1;\n}\n"
     assert isinstance(functions_in_source(unparsable, path, root), list)
+
+
+def test_help_mentions_dart(capsys):
+    from crapper.cli import run
+
+    assert run(["--help"]) == 0
+    text = capsys.readouterr().out
+    assert "Dart (.dart)" in text
+    assert "flutter test --coverage" in text
+    assert "*_test.dart" in text
+    assert "*.g.dart" in text
