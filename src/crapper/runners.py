@@ -284,8 +284,15 @@ def _coverage_report(root: Path, module: Path, language: str) -> Path:
     module = module.resolve()
     if module == root:
         return root / "target" / "coverage" / language / "lcov.info"
-    slug = module.relative_to(root).as_posix().replace("/", "__")
-    return root / "target" / "coverage" / language / slug / "lcov.info"
+    return root / "target" / "coverage" / language / _module_slug(root, module) / "lcov.info"
+
+
+def _module_slug(root: Path, module: Path) -> str:
+    """A module outside the root keeps its whole path, so two of them never collide."""
+
+    if module.is_relative_to(root):
+        return module.relative_to(root).as_posix().replace("/", "__")
+    return "external__" + module.as_posix().strip("/").replace("/", "__")
 
 
 def rust_modules(root: Path, files: list[Path]) -> list[Path]:
