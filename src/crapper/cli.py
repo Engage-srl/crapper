@@ -36,6 +36,7 @@ _TEST_PATTERNS = ", ".join(
         "*_test.py",
         "conftest.py",
         f"*{DART_TEST_SUFFIX}",
+        "Dart files under integration_test/ or test_driver/",
     ]
 )
 

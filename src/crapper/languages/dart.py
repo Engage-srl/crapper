@@ -32,6 +32,7 @@ _TYPES = {
     "mixin_declaration",
     "extension_declaration",
     "enum_declaration",
+    "extension_type_declaration",
 }
 _DECISIONS = {
     "if_statement",
@@ -40,7 +41,6 @@ _DECISIONS = {
     "for_element",
     "while_statement",
     "do_statement",
-    "catch_clause",
     "conditional_expression",
     "switch_statement_case",
     "switch_statement_default",
@@ -53,6 +53,14 @@ _DECISIONS = {
 _PACKAGE_NAME = re.compile(r"^name:\s*['\"]?([\w.]+)", re.MULTILINE)
 
 
+def _handlers(node) -> int:
+    """`on E {}` and `catch (e) {}` each end in a block; so do `try` and `finally`."""
+
+    blocks = sum(1 for child in node.children if child.type == "block")
+    has_finally = any(child.type == "finally" for child in node.children)
+    return blocks - 1 - int(has_finally)
+
+
 def _complexity(body) -> int:
     score = 1
     stack = [body]
@@ -60,6 +68,8 @@ def _complexity(body) -> int:
         current = stack.pop()
         if current.type in _DECISIONS:
             score += 1
+        elif current.type == "try_statement":
+            score += _handlers(current)
         stack.extend(current.children)
     return score
 

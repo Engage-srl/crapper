@@ -516,10 +516,12 @@ def _merge_lcov(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     dart = package_reports(root)
     skipped = {report.resolve() for _, report in dart}
     paths = [path for path in _lcov_paths(root) if path.resolve() not in skipped]
-    for text in _merge_texts(paths):
-        merged.update(parse_lcov(text))
+    # A package's own `flutter test --coverage` report is the fallback; a
+    # fresh report under target/ wins.
     for package, report in dart:
         merged.update(parse_lcov(absolute_sources(_read(report) or "", package)))
+    for text in _merge_texts(paths):
+        merged.update(parse_lcov(text))
     return merged
 
 

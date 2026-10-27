@@ -224,3 +224,24 @@ def test_help_mentions_dart(capsys):
     assert "flutter test --coverage" in text
     assert "*_test.dart" in text
     assert "*.g.dart" in text
+
+
+def test_dart_on_handlers_count_like_catch(tmp_path):
+    source = "void f() {\n  try {} on E {} on F catch (e) {} catch (e, s) {} finally {}\n}\n"
+    path, root = _package(tmp_path, "lib/a.dart", source)
+    [function] = functions_in_source(source, path, root)
+    assert function.complexity == 4
+
+
+def test_dart_extension_type_is_a_namespace(tmp_path):
+    source = "extension type Meters(int v) {\n  int twice() => v * 2;\n}\n"
+    assert _rows(tmp_path, "lib/a.dart", source) == [("demo.a.Meters", "twice")]
+
+
+def test_dart_test_folders_do_not_skip_other_languages(tmp_path):
+    assert not is_test_file("integration_test/tool.go")
+    assert is_test_file("integration_test/app.dart")
+    (tmp_path / "integration_test").mkdir()
+    (tmp_path / "integration_test" / "tool.go").write_text("package x\n")
+    (tmp_path / "integration_test" / "app.dart").write_text("void a() {}\n")
+    assert [p.name for p in iter_source_files([tmp_path])] == ["tool.go"]
