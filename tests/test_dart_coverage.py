@@ -102,3 +102,26 @@ def test_cli_reports_dart_functions_with_coverage(tmp_path):
     assert '"pick"' in text
     assert ":complexity 2" in text
     assert ":coverage 75.0" in text
+
+
+def test_fresh_report_wins_over_package_coverage(tmp_path):
+    _write(tmp_path / "pubspec.yaml", "name: demo\n")
+    _write(tmp_path / "lib" / "a.dart", "int f() {\n  return 1;\n}\n")
+    source = (tmp_path / "lib" / "a.dart").resolve()
+    _write(
+        tmp_path / "target" / "coverage" / "dart" / "lcov.info",
+        f"SF:{source}\nDA:1,1\nDA:2,1\nend_of_record\n",
+    )
+    _write(tmp_path / "coverage" / "lcov.info", "SF:lib/a.dart\nDA:1,0\nDA:2,0\nend_of_record\n")
+    assert run(["--root", str(tmp_path), "--use-existing-coverage"]) == 0
+    assert ":coverage 100.0" in _edn(tmp_path)
+
+
+def test_missing_tool_removes_the_old_report(tmp_path, monkeypatch):
+    core = tmp_path / "core"
+    _write(core / "pubspec.yaml", "name: core\n")
+    file = _write(core / "lib" / "a.dart", SOURCE)
+    old = _write(tmp_path / "target" / "coverage" / "dart" / "core" / "lcov.info", "SF:x\nend_of_record\n")
+    monkeypatch.setattr(runners.shutil, "which", lambda name: None)
+    runners.run_coverage(tmp_path, [file], None)
+    assert not old.exists()

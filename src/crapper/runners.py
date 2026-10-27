@@ -574,10 +574,13 @@ def _cover_dart(root: Path, files: list[Path]) -> None:
     for package in packages:
         report = _coverage_report(root, package, "dart")
         command = dart_command(package, report)
-        if shutil.which(command[0]) is None:
-            _warn(f"{command[0]} is not on PATH. Dart coverage will score 0% in {package}.")
-            continue
         _prepare_report(report)
+        if shutil.which(command[0]) is None:
+            _warn(
+                f"{command[0]} is not on PATH. No new Dart coverage in {package}; "
+                "its coverage/lcov.info is read if present, else it scores 0%."
+            )
+            continue
         code = run_shell(command, package)
         if code != 0:
             _warn(f"Dart coverage exited {code} in {package}. Coverage was kept if written.")
