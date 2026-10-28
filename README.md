@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Kotlin, Go, TypeScript, Rust, and Python. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -16,7 +16,7 @@ CRAP = CC² × (1 − coverage)³ + CC
 ./crapper
 ```
 
-The first run creates `.venv` and installs the tool. From a project root it walks the tree, skips `test`, `spec`, `vendor`, `node_modules`, and `target`, and writes two results:
+The first run creates `.venv` and installs the tool. From a project root it walks the tree, skips `test`, `spec`, `vendor`, `node_modules`, and `target`, plus Gradle and Kotlin Multiplatform test source sets (`commonTest`, `jvmTest`, `androidUnitTest`, `testFixtures`: a lowercase name ending in `Test` or `Tests`, or `test` followed by a capital), and writes two results:
 
 - a table on stdout, worst score first
 - `.metrics/crap.edn`, replaced on every successful analysis
@@ -48,7 +48,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | --- | --- | --- |
 | Clojure | the `ns` | the `defn` / `defn-` name |
 | Java | `package.Class`, or `package.Outer.Inner` | the method name |
-| Kotlin | `package.Class`, `package.Outer.Inner`, `package.Outer.Companion`, or `package.FileKt` for top-level functions | the function name, or `getX` / `setX` for a custom accessor |
+| Kotlin | `package.Class`, `package.Outer.Inner`, or `package.Class.Companion`; `package.FileNameKt` (or the `@file:JvmName`) for a top-level function | the function name |
 | Go | the package import path, or `import/path.Receiver` | the function or method name |
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
@@ -61,9 +61,9 @@ Rename or move is a new entry. There is no identity matching across runs.
 
 Clojure follows crap4clj: `if` / `when` and their variants, `and`, `or`, `loop`, `catch`, and each clause of `cond`, `condp`, `case`, `cond->`, `cond->>`, `some->`, and `some->>`. Coverage prefers Cloverage's per-line form counts and falls back to LCOV.
 
-Java follows crap4java: `if`, loops, `catch`, `?:`, each `switch` label, and `&&` / `||`. Constructors and methods inside anonymous classes are omitted. Coverage is JaCoCo's `INSTRUCTION` counter.
+Java follows crap4java: `if`, loops, `catch`, `?:`, each `switch` label, and `&&` / `||`. Constructors and methods inside anonymous classes are omitted. Coverage is JaCoCo's `INSTRUCTION` counter, from Maven, or from Gradle when the nearest build file is `build.gradle` or `build.gradle.kts`.
 
-Kotlin (`.kt`; `.kts` build scripts are not sources) counts `if`, `for`, `while`, `do`, `catch`, each `when` branch except `else`, the elvis operator `?:`, and each `&&` / `||`. Safe calls `?.` do not count. Entries are `fun` declarations in classes, interfaces, objects, companion objects, and at the top level, extension functions included, plus custom property accessors. Abstract and `inline` functions, constructors, `init` blocks, local functions, and members of anonymous objects are not entries; local functions and lambdas count toward the function that holds them. Coverage is JaCoCo's `INSTRUCTION` counter, as for Java. Kotlin compiles each lambda to its own method (`name$lambda$0`), so a function's coverage adds its lambdas. Top-level functions are looked up in the file class (`FileKt`, or `@file:JvmName`), interface bodies in `$DefaultImpls`, and renamed `internal` (`name$module`) and value-class (`name-hash`) methods are matched.
+Kotlin (`.kt`) uses the same structural decisions as Java: `if`, loops, `catch`, each `when` entry (including `else`) and each `when` guard (`is A if cond ->`), and `&&` / `||`, plus `?:` and each `?.`. `!!` is not counted. Every `fun` with a body is an entry, including expression bodies, extension functions, and functions in an `object` or `companion object`. Local functions and lambdas stay inside the enclosing function. Secondary constructors, `init` blocks, and functions inside anonymous objects and local classes are omitted. Coverage is JaCoCo, from the same Maven or Gradle run as Java, joined on the class JaCoCo reports: `Outer$Inner`, `Class$Companion`, `Interface$DefaultImpls`, `Enum$ENTRY`, `FileNameKt`, or the `@file:JvmName` and its `@file:JvmMultifileClass` part. A mangled JVM name (`name$module` for `internal`, `name-hash` for inline-class parameters) still joins; a function-level `@JvmName` does not. A file with a parse error is still scored, with a warning, since a function inside the error may score wrong.
 
 Go follows crap4go: `if`, `for`, `range`, each `switch` and `select` clause, and `&&` / `||`. Coverage is `go test -coverprofile`.
 
@@ -82,7 +82,7 @@ By default a run deletes the previous report for each language it is about to me
 | Language | Command | Report |
 | --- | --- | --- |
 | Clojure | `clj -M:cov --lcov` (needs `deps.edn` or `bb.edn`) | `target/coverage/` |
-| Java, Kotlin | JaCoCo Maven plugin `0.8.12` in each module with `pom.xml`, once per module | `target/site/jacoco/jacoco.xml` |
+| Java, Kotlin | JaCoCo Maven plugin `0.8.12` in each module with `pom.xml`; otherwise `gradlew` or `gradle` with an init script that applies `jacoco`, then `test jacocoTestReport` | `target/site/jacoco/jacoco.xml` or `build/reports/jacoco/test/jacocoTestReport.xml` |
 | Go | `go test ./... -coverprofile=...` | `target/coverage/go/coverage.out` |
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
@@ -90,8 +90,6 @@ By default a run deletes the previous report for each language it is about to me
 | Dart | `flutter test --coverage --coverage-path ...` when `pubspec.yaml` depends on `sdk: flutter`, else `dart test --coverage-path ...`, per package | `target/coverage/dart/<package>/lcov.info` |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
-
-A multi-module Maven project whose modules depend on each other, or that already binds JaCoCo in its own `pom.xml`, should build its own reports: `crapper --coverage-command "mvn -q test"`, or `mvn test` once and then `crapper --use-existing-coverage`.
 
 ## Development
 

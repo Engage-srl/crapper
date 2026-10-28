@@ -1,6 +1,7 @@
 """Find source files and decide which language each one is written in."""
 
 import os
+import re
 from pathlib import Path
 
 EXTENSIONS = {
@@ -26,7 +27,6 @@ EXTENSIONS = {
 
 SKIP_DIRS = {
     ".git",
-    ".claude",
     ".hg",
     ".svn",
     ".idea",
@@ -48,6 +48,10 @@ SKIP_DIRS = {
 
 TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__"}
 DART_TEST_DIRS = {"integration_test", "test_driver"}
+# Gradle and Kotlin Multiplatform source sets: commonTest, jvmTest,
+# androidUnitTest, testFixtures, testData. A package such as `testing` or a
+# module such as `okio-testing-support` is not one.
+_TEST_SOURCE_SET = re.compile(r"[a-z][A-Za-z0-9]*Tests?|test[A-Z][A-Za-z0-9]*")
 
 GO_TEST_SUFFIX = "_test.go"
 CLOJURE_TEST_SUFFIXES = ("_test.clj", "_test.cljc", "_test.cljs", "_test.bb")
@@ -93,18 +97,22 @@ def language_of(path: str | Path) -> str | None:
     return EXTENSIONS.get(file_path.suffix)
 
 
-def _test_dirs(file_path: Path) -> set[str]:
-    """`integration_test/` and `test_driver/` hold Dart tests only."""
+def is_test_dir(name: str) -> bool:
+    return name in TEST_DIRS or _TEST_SOURCE_SET.fullmatch(name) is not None
 
-    if file_path.suffix == ".dart":
-        return TEST_DIRS | DART_TEST_DIRS
-    return TEST_DIRS
+
+def _dart_test(file_path: Path) -> bool:
+    return file_path.name.endswith(DART_TEST_SUFFIX) or any(
+        part in DART_TEST_DIRS for part in file_path.parts
+    )
 
 
 def is_test_file(path: str | Path) -> bool:
     file_path = Path(path)
     name = file_path.name
-    if name.endswith((GO_TEST_SUFFIX, DART_TEST_SUFFIX)):
+    if name.endswith(GO_TEST_SUFFIX):
+        return True
+    if file_path.suffix == ".dart" and _dart_test(file_path):
         return True
     if name.endswith(CLOJURE_TEST_SUFFIXES):
         return True
@@ -114,7 +122,7 @@ def is_test_file(path: str | Path) -> bool:
         return True
     if name.endswith("_test.py") or (name.startswith("test_") and name.endswith(".py")):
         return True
-    return any(part in _test_dirs(file_path) for part in file_path.parts)
+    return any(is_test_dir(part) for part in file_path.parts)
 
 
 def _walk(root: Path) -> list[Path]:
@@ -125,7 +133,7 @@ def _walk(root: Path) -> list[Path]:
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
-            name for name in dirnames if name not in SKIP_DIRS and name not in TEST_DIRS
+            name for name in dirnames if name not in SKIP_DIRS and not is_test_dir(name)
         ]
         for name in filenames:
             path = Path(dirpath) / name

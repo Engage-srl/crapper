@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from crapper.dart_coverage import dart_command, rewrite_report
@@ -23,6 +24,23 @@ _MAVEN = [
     "test",
     "org.jacoco:jacoco-maven-plugin:0.8.12:report",
 ]
+
+_JVM_SUFFIXES = (".java", ".kt")
+_GRADLE_BUILD_FILES = ("build.gradle", "build.gradle.kts")
+_GRADLE_SETTINGS_FILES = ("settings.gradle", "settings.gradle.kts")
+_GRADLE_REPORT = Path("build/reports/jacoco/test/jacocoTestReport.xml")
+# Applied from outside the build, like the Maven goals, so the project's
+# build file needs no change.
+_GRADLE_INIT = """\
+allprojects {
+    apply plugin: 'jacoco'
+    tasks.withType(JacocoReport) {
+        reports {
+            xml.required = true
+        }
+    }
+}
+"""
 
 
 def _warn(message: str) -> None:
@@ -299,7 +317,7 @@ def rust_modules(root: Path, files: list[Path]) -> list[Path]:
     root = root.resolve()
     return [
         module.resolve()
-        for module in _modules_with(files, ".rs", "Cargo.toml", root)
+        for module in _modules_with(files, (".rs",), "Cargo.toml", root)
     ]
 
 
@@ -425,9 +443,8 @@ def _languages_in(files: list[Path]) -> set[str]:
 
 
 def _modules_with(
-    files: list[Path], suffix: str | tuple[str, ...], marker: str, root: Path
+    files: list[Path], suffixes: tuple[str, ...], marker: str, root: Path
 ) -> list[Path]:
-    suffixes = (suffix,) if isinstance(suffix, str) else suffix
     modules: set[Path] = set()
     for file in files:
         if Path(file).suffix not in suffixes:
@@ -436,6 +453,65 @@ def _modules_with(
         if module is not None:
             modules.add(module)
     return sorted(modules)
+
+
+def _nearest_gradle(file: Path, root: Path) -> Path | None:
+    found = [_nearest(file, marker, root) for marker in _GRADLE_BUILD_FILES]
+    modules = [module for module in found if module is not None]
+    return max(modules, key=lambda module: len(module.parts), default=None)
+
+
+def gradle_modules(root: Path, files: list[Path]) -> list[Path]:
+    """Modules for Java and Kotlin files whose nearest build file is Gradle's.
+
+    A directory with both pom.xml and a Gradle build file is a Maven module.
+    """
+
+    modules: set[Path] = set()
+    for file in files:
+        if Path(file).suffix not in _JVM_SUFFIXES:
+            continue
+        module = _nearest_gradle(file, root)
+        if module is None:
+            continue
+        maven = _nearest(file, "pom.xml", root)
+        if maven is None or len(module.parts) > len(maven.parts):
+            modules.add(module)
+    return [module for module in sorted(modules) if not _runs_inside(module, modules)]
+
+
+def _gradle_build(module: Path) -> Path | None:
+    """The directory whose settings file puts this module in a multi-project build."""
+
+    for directory in (module, *module.parents):
+        if any((directory / name).is_file() for name in _GRADLE_SETTINGS_FILES):
+            return directory
+    return None
+
+
+def _runs_inside(module: Path, modules: set[Path]) -> bool:
+    """True when a selected module above this one, in the same build, runs its tests.
+
+    Gradle runs a task in the current project and every project below it. A
+    settings file starts a separate build, which an outer run does not enter,
+    and without one a module is a build of its own.
+    """
+
+    build = _gradle_build(module)
+    if build is None:
+        return False
+    return any(
+        outer != module and module.is_relative_to(outer) and outer.is_relative_to(build)
+        for outer in modules
+    )
+
+
+def gradle_command(module: Path, root: Path, init_script: Path) -> list[str]:
+    """The nearest Gradle wrapper, so a subproject uses its build's wrapper."""
+
+    wrapper = _nearest(module, "gradlew", root)
+    gradle = str(wrapper / "gradlew") if wrapper is not None else "gradle"
+    return [gradle, "--init-script", str(init_script), "test", "jacocoTestReport"]
 
 
 def _cover_clojure(root: Path) -> None:
@@ -451,11 +527,23 @@ def _cover_clojure(root: Path) -> None:
         _warn(f"Clojure coverage exited {code}. Clojure coverage will score 0%.")
 
 
-def _cover_java(root: Path, files: list[Path]) -> None:
-    modules = _modules_with(files, (".java", ".kt"), "pom.xml", root)
-    if not modules:
-        _warn("No pom.xml; skipping Java coverage.")
+def _cover_jvm(root: Path, files: list[Path]) -> None:
+    """Java and Kotlin share one JaCoCo run per module."""
+
+    modules = _modules_with(files, _JVM_SUFFIXES, "pom.xml", root)
+    gradle = gradle_modules(root, files)
+    if not modules and not gradle:
+        _warn("No pom.xml or build.gradle; skipping Java and Kotlin coverage.")
         return
+    _cover_maven(modules)
+    _cover_gradle(root, gradle)
+
+
+def _jvm_failure(code: int, module: Path) -> str:
+    return f"JaCoCo coverage exited {code} in {module}. Java and Kotlin coverage will score 0%."
+
+
+def _cover_maven(modules: list[Path]) -> None:
     for module in modules:
         _clean_dir(module / "target" / "site" / "jacoco")
         exec_file = module / "target" / "jacoco.exec"
@@ -463,11 +551,24 @@ def _cover_java(root: Path, files: list[Path]) -> None:
             exec_file.unlink()
         code = run_shell(_MAVEN, module)
         if code != 0:
-            _warn(f"Java coverage exited {code} in {module}. Java coverage will score 0%.")
+            _warn(_jvm_failure(code, module))
+
+
+def _cover_gradle(root: Path, modules: list[Path]) -> None:
+    if not modules:
+        return
+    with tempfile.TemporaryDirectory() as scratch:
+        init_script = Path(scratch) / "jacoco.gradle"
+        init_script.write_text(_GRADLE_INIT, encoding="utf-8")
+        for module in modules:
+            (module / _GRADLE_REPORT).unlink(missing_ok=True)
+            code = run_shell(gradle_command(module, root, init_script), module)
+            if code != 0:
+                _warn(_jvm_failure(code, module))
 
 
 def _cover_go(root: Path, files: list[Path]) -> None:
-    modules = _modules_with(files, ".go", "go.mod", root)
+    modules = _modules_with(files, (".go",), "go.mod", root)
     if not modules:
         _warn("No go.mod; skipping Go coverage.")
         return
@@ -594,15 +695,6 @@ def _cover_dart(root: Path, files: list[Path]) -> None:
         rewrite_report(report, package)
 
 
-_PER_MODULE = (
-    ("go", _cover_go),
-    ("typescript", _cover_typescript),
-    ("python", _cover_python),
-    ("rust", _cover_rust),
-    ("dart", _cover_dart),
-)
-
-
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -625,8 +717,15 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     if "clojure" in languages:
         _cover_clojure(root)
     if languages & {"java", "kotlin"}:
-        _cover_java(root, files)
-    for language, cover in _PER_MODULE:
-        if language in languages:
-            cover(root, files)
+        _cover_jvm(root, files)
+    if "go" in languages:
+        _cover_go(root, files)
+    if "typescript" in languages:
+        _cover_typescript(root, files)
+    if "python" in languages:
+        _cover_python(root, files)
+    if "rust" in languages:
+        _cover_rust(root, files)
+    if "dart" in languages:
+        _cover_dart(root, files)
     return 0
