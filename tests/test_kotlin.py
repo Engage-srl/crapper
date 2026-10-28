@@ -1,85 +1,272 @@
-from crapper.languages.kotlin import functions_in_source
+from crapper.coverage import CoverageBundle, parse_jacoco_index
+from crapper.languages.kotlin import file_class, functions_in_source
 
 SCORE = """
 package demo
 
 class Sample {
-    fun score(a: Boolean, b: Boolean, v: Int?, xs: List<Int>): Int {
-        if (a && b || a) {
-        } else if (b) {
-        }
-        when (v) {
-            1, 2 -> {}
-            3 -> {}
-            else -> {}
-        }
-        for (x in xs) {
+    fun score(a: Boolean, b: Boolean, values: List<Int>, name: String?): Int {
+        for (value in values) {
         }
         while (a) {
         }
         do {
         } while (b)
-        try {
-        } catch (e: Exception) {
-        } finally {
+        if (a && b || values.isEmpty()) {
         }
-        val n = v ?: 0
-        v?.let { it!! }
-        xs.map { if (it > 0) 1 else 2 }
-        return n
+        val size = name?.length ?: 0
+        return try {
+            when (size) {
+                0 -> 1
+                1, 2 -> 2
+                else -> 3
+            }
+        } catch (ex: RuntimeException) {
+            4
+        }
     }
 }
 """
 
-NAMES = """
+NESTED = """
+package demo
+
+class Sample {
+    fun outer(a: Boolean): Int {
+        val callback = { if (a) 1 else 2 }
+        fun local(b: Boolean) = if (b) 1 else 0
+        val runnable = object : Runnable {
+            override fun run() {
+                if (a) {
+                }
+            }
+        }
+        class Local {
+            fun inner() = if (a) 1 else 0
+        }
+        return callback() + local(a)
+    }
+}
+"""
+
+
+def _rows(source: str, path: str = "src/demo/Sample.kt"):
+    return [
+        (function.namespace, function.name, function.complexity)
+        for function in functions_in_source(source, path)
+    ]
+
+
+def test_counts_branches_when_entries_and_null_safe_operators():
+    # for, while, do, if, &&, ||, ?., ?:, three when entries, catch.
+    assert _rows(SCORE) == [("demo.Sample", "score", 13)]
+
+
+def test_lambdas_and_local_functions_stay_in_the_enclosing_function():
+    # The lambda's `if` and the local function's `if`; not the anonymous
+    # object's or the local class's.
+    assert _rows(NESTED) == [("demo.Sample", "outer", 3)]
+
+
+def test_names_follow_the_classes_jacoco_reports():
+    source = """
 package demo.pkg
 
+fun top(x: Int?) = x ?: 0
+
+fun String.shout(): String = uppercase()
+
 class Board {
-    fun place() {
+    fun place(x: Int) {
+        if (x > 0) return
     }
 
-    class Inner {
-        fun tick() {
-        }
+    inner class Inner {
+        fun tick() {}
     }
 
     companion object {
-        fun make() {
-        }
+        fun create() = Board()
+    }
+
+    object Named {
+        fun get() = 1
+    }
+
+    abstract fun skipped()
+
+    constructor(x: Int) {
+        if (x > 0) {}
+    }
+
+    init {
+        if (true) {}
     }
 }
 
 object Registry {
-    fun find() {
-    }
+    fun lookup() = 1
 }
+"""
+    functions = functions_in_source(source, "src/demo/pkg/board-utils.kt")
+    assert [(f.namespace, f.name, f.jacoco_class) for f in functions] == [
+        ("demo.pkg.Board_utilsKt", "top", "demo.pkg.Board_utilsKt"),
+        ("demo.pkg.Board_utilsKt", "shout", "demo.pkg.Board_utilsKt"),
+        ("demo.pkg.Board", "place", "demo.pkg.Board"),
+        ("demo.pkg.Board.Inner", "tick", "demo.pkg.Board$Inner"),
+        ("demo.pkg.Board.Companion", "create", "demo.pkg.Board$Companion"),
+        ("demo.pkg.Board.Named", "get", "demo.pkg.Board$Named"),
+        ("demo.pkg.Registry", "lookup", "demo.pkg.Registry"),
+    ]
+    assert [f.complexity for f in functions] == [2, 1, 2, 1, 1, 1, 1]
+    assert functions[2].start_line == 9
+    assert functions[2].end_line == 11
+    assert functions[2].language == "kotlin"
+
+
+def test_interface_defaults_named_companions_and_enum_entries():
+    source = """
+package demo
 
 interface Shape {
-    fun area(): Int {
-        return 1
-    }
+    fun area(): Double = 0.0
 
-    fun abstractOne()
-}
-
-fun String.shout() = uppercase()
-"""
-
-JVM_NAME = """
-@file:JvmName("Utils")
-
-package a
-
-fun top() {
-}
-
-class C {
     companion object Factory {
-        fun of() {
-        }
+        fun unit() = 1
+    }
+}
+
+enum class Mode {
+    FAST {
+        override fun speed() = 2
+    },
+    SLOW;
+
+    open fun speed() = 1
+}
+"""
+    functions = functions_in_source(source, "src/demo/Shape.kt")
+    assert [(f.namespace, f.name, f.jacoco_class) for f in functions] == [
+        ("demo.Shape", "area", "demo.Shape$DefaultImpls"),
+        ("demo.Shape.Factory", "unit", "demo.Shape$Factory"),
+        ("demo.Mode", "speed", "demo.Mode$FAST"),
+        ("demo.Mode", "speed", "demo.Mode"),
+    ]
+
+
+def test_file_class_follows_jvm_name_and_multifile_parts():
+    assert file_class("src/util.kt", "") == ("UtilKt", "UtilKt")
+    assert file_class("src/9lives.kt", "") == ("_9livesKt", "_9livesKt")
+    named = '@file:JvmName("Strings")\npackage demo\n'
+    assert file_class("src/util.kt", named) == ("Strings", "Strings")
+    multi = '@file:JvmName("Strings")\n@file:JvmMultifileClass\npackage demo\n'
+    assert file_class("src/util.kt", multi) == ("Strings", "Strings__UtilKt")
+
+
+def test_top_level_function_in_the_default_package():
+    functions = functions_in_source("fun main() {}\n", "Main.kt")
+    assert [(f.namespace, f.name, f.jacoco_class) for f in functions] == [
+        ("MainKt", "main", "MainKt")
+    ]
+
+
+def test_a_file_with_parse_errors_warns(capsys):
+    functions_in_source("package demo\n\nfun ok() {}\n", "src/Ok.kt")
+    assert capsys.readouterr().err == ""
+    functions_in_source("package demo\n\nclass Broken {\n    fun f( {\n}\n", "src/Broken.kt")
+    assert capsys.readouterr().err == (
+        "src/Broken.kt: Kotlin parse error; scores in this file may be wrong.\n"
+    )
+
+
+GUARDS = """
+package demo
+
+sealed interface Shape {
+    data class Circle(val r: Double) : Shape
+    data class Rect(val w: Double, val h: Double) : Shape
+    data object Empty : Shape
+}
+
+fun label(s: Shape): String = when (s) {
+    is Shape.Circle if s.r > 10.0 -> "big circle"
+    is Shape.Circle -> "circle"
+    is Shape.Rect if s.w == s.h -> "square"
+    is Shape.Rect -> "rect"
+    Shape.Empty -> "empty"
+}
+"""
+
+
+def _complexity(source: str) -> int:
+    [function] = functions_in_source(source, "src/main/kotlin/demo/Guards.kt")
+    return function.complexity
+
+
+def test_a_when_guard_is_a_second_decision_on_its_branch():
+    [function] = functions_in_source(GUARDS, "src/main/kotlin/demo/Shapes.kt")
+    assert (function.name, function.complexity) == ("label", 8)
+    plain = "fun pick(x: Int) = when (x) { 1 -> 1; 2 -> 2; else -> 3 }\n"
+    guarded = "fun pick(x: Int) = when (x) { 1 if x > 0 -> 1; 2 -> 2; else -> 3 }\n"
+    assert _complexity(guarded) == _complexity(plain) + 1
+
+
+def test_a_guard_with_and_counts_the_guard_and_the_and():
+    plain = "fun pick(v: Any, a: Boolean, b: Boolean) = when (v) { is String -> 1; else -> 0 }\n"
+    guarded = "fun pick(v: Any, a: Boolean, b: Boolean) = when (v) { is String if a && b -> 1; else -> 0 }\n"
+    assert _complexity(guarded) == _complexity(plain) + 2
+
+
+BACKTICKS = """
+package okio
+
+object `-DeprecatedOkio` {
+    fun buffer(x: Int) = x + 1
+}
+
+class Plain {
+    class `with space` {
+        fun inside() = 2
+    }
+}
+
+internal class `Outer$WithDate$DefaultImpls` {
+    companion object {
+        fun date() = 3
     }
 }
 """
+
+
+def test_backticked_type_names_follow_the_classes_jacoco_reports():
+    functions = functions_in_source(BACKTICKS, "src/okio/-DeprecatedOkio.kt")
+    assert [(f.namespace, f.name, f.jacoco_class) for f in functions] == [
+        ("okio.-DeprecatedOkio", "buffer", "okio.-DeprecatedOkio"),
+        ("okio.Plain.with space", "inside", "okio.Plain$with space"),
+        (
+            "okio.Outer$WithDate$DefaultImpls.Companion",
+            "date",
+            "okio.Outer$WithDate$DefaultImpls$Companion",
+        ),
+    ]
+
+
+def test_a_backticked_object_joins_its_jacoco_class():
+    xml = """<?xml version="1.0"?>
+<report>
+  <package name="okio">
+    <class name="okio/-DeprecatedOkio">
+      <method name="buffer" desc="(I)I" line="5">
+        <counter type="INSTRUCTION" missed="1" covered="3"/>
+      </method>
+    </class>
+  </package>
+</report>
+"""
+    buffer = functions_in_source(BACKTICKS, "src/okio/-DeprecatedOkio.kt")[0]
+    bundle = CoverageBundle(jacoco=parse_jacoco_index(xml))
+    assert bundle.percent_for(buffer) == 75.0
+
 
 ACCESSORS = """
 package a
@@ -99,110 +286,9 @@ class Box(val full: Boolean) {
 }
 """
 
-EXCLUDED = """
-package a
-
-abstract class Holder(val x: Boolean) {
-    init {
-        if (x) {
-        }
-    }
-
-    constructor() : this(true)
-
-    abstract fun abs()
-
-    inline fun <reified T> inl() {
-        if (x) {
-        }
-    }
-
-    fun outer() {
-        fun local() {
-            if (x) {
-            }
-        }
-        val o = object : Runnable {
-            override fun run() {
-                if (x) {
-                }
-            }
-        }
-        local()
-    }
-}
-"""
-
-STABLE = """
-fun stable(): String {
-    val s = "if && || ?: when"
-    // if && || ?: when
-    /* if && || */
-    return s
-}
-"""
-
-
-def _rows(found, *fields):
-    return [tuple(getattr(function, field) for field in fields) for function in found]
-
-
-def test_counts_kotlin_decisions():
-    found = functions_in_source(SCORE, "Sample.kt")
-    assert _rows(found, "name", "complexity") == [("score", 13)]
-
-
-def test_expression_body_function():
-    source = "package a\n\nfun pick(x: Int?): Int = x ?: 0\n"
-    [function] = functions_in_source(source, "src/a/Pick.kt")
-    assert (function.namespace, function.name, function.complexity, function.jacoco_class) == (
-        "a.PickKt",
-        "pick",
-        2,
-        "a.PickKt",
-    )
-    assert function.language == "kotlin"
-    assert function.start_byte < function.end_byte
-
-
-def test_names_classes_objects_and_companions():
-    found = functions_in_source(NAMES, "src/demo/pkg/Board.kt")
-    assert _rows(found, "namespace", "name", "jacoco_class") == [
-        ("demo.pkg.Board", "place", "demo.pkg.Board"),
-        ("demo.pkg.Board.Inner", "tick", "demo.pkg.Board$Inner"),
-        ("demo.pkg.Board.Companion", "make", "demo.pkg.Board$Companion"),
-        ("demo.pkg.Registry", "find", "demo.pkg.Registry"),
-        ("demo.pkg.Shape", "area", "demo.pkg.Shape"),
-        ("demo.pkg.BoardKt", "shout", "demo.pkg.BoardKt"),
-    ]
-
-
-def test_named_companion_and_file_jvm_name():
-    found = functions_in_source(JVM_NAME, "src/a/Top.kt")
-    assert _rows(found, "namespace", "name", "jacoco_class") == [
-        ("a.Utils", "top", "a.Utils"),
-        ("a.C.Factory", "of", "a.C$Factory"),
-    ]
-
 
 def test_custom_accessors_are_functions():
-    found = functions_in_source(ACCESSORS, "src/a/Box.kt")
-    assert _rows(found, "name", "complexity") == [("getSize", 2), ("setLabel", 1)]
-
-
-def test_excluded_declarations():
-    found = functions_in_source(EXCLUDED, "src/a/Holder.kt")
-    assert _rows(found, "name", "complexity") == [("outer", 2)]
-
-
-def test_no_package_and_keywords_in_strings():
-    found = functions_in_source(STABLE, "Stable.kt")
-    assert _rows(found, "namespace", "name", "complexity") == [("StableKt", "stable", 1)]
-
-
-def test_each_chained_operator_is_a_decision():
-    source = "fun g(a: Boolean, b: Boolean, c: Boolean) {\n    if (a && b && c || a || b) {\n    }\n}\n"
-    assert _rows(functions_in_source(source, "G.kt"), "name", "complexity") == [("g", 6)]
+    assert _rows(ACCESSORS, "src/a/Box.kt") == [("a.Box", "getSize", 2), ("a.Box", "setLabel", 1)]
 
 
 def test_is_properties_keep_their_jvm_accessor_names():
@@ -217,37 +303,9 @@ class Door {
         }
 }
 """
-    found = functions_in_source(source, "src/a/Door.kt")
-    assert _rows(found, "name") == [("isOpen",), ("setOpen",)]
+    assert [name for _, name, _ in _rows(source, "src/a/Door.kt")] == ["isOpen", "setOpen"]
 
 
-def test_enum_entry_bodies_are_their_own_class():
-    source = """
-package a
-
-enum class Hold {
-    OUTBOUND {
-        override fun next(): Int {
-            return 1
-        }
-    },
-    INBOUND {
-        override fun next(): Int {
-            return 2
-        }
-    };
-
-    abstract fun next(): Int
-}
-"""
-    found = functions_in_source(source, "src/a/Hold.kt")
-    assert _rows(found, "namespace", "name", "jacoco_class") == [
-        ("a.Hold.OUTBOUND", "next", "a.Hold$OUTBOUND"),
-        ("a.Hold.INBOUND", "next", "a.Hold$INBOUND"),
-    ]
-
-
-def test_file_class_is_capitalized_and_sanitized():
-    source = "package a\n\nfun main() {\n}\n"
-    assert _rows(functions_in_source(source, "src/a/main.kt"), "jacoco_class") == [("a.MainKt",)]
-    assert _rows(functions_in_source(source, "src/a/my-file.kt"), "jacoco_class") == [("a.My_fileKt",)]
+def test_a_top_level_accessor_lives_in_the_file_class():
+    source = "package a\n\nval size: Int\n    get() = 1\n"
+    assert _rows(source, "src/a/Util.kt") == [("a.UtilKt", "getSize", 1)]

@@ -5,11 +5,11 @@ from crapper.languages import functions_in_file
 _SOURCES = [
     ("clojure", "(defn choose [x] x)\n", "src/demo/core.clj", "choose"),
     ("java", "class Board { void place() { if (true) return; } }\n", "Board.java", "place"),
+    ("kotlin", "class Board {\n    fun place() {}\n}\n", "Board.kt", "place"),
     ("go", "package demo\nfunc Place() int { return 1 }\n", "board.go", "Place"),
     ("typescript", "export function view() { return 1 }\n", "src/ui.ts", "view"),
     ("python", "def run():\n    return 1\n", "src/app.py", "run"),
     ("rust", "pub fn open() {}\n", "src/lib.rs", "open"),
-    ("kotlin", "package a\n\nfun place() {\n    if (true) return\n}\n", "src/a/Board.kt", "place"),
 ]
 
 

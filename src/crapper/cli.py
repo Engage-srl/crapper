@@ -47,8 +47,8 @@ Detect the language of each source file and score it with the CRAP metric
 CRAP = CC² × (1 − coverage)³ + CC. Writes .metrics/crap.edn for uml-viewer
 and prints a report sorted worst first.
 
-Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Kotlin (.kt), Go (.go),
-TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
+Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Kotlin (.kt),
+Go (.go), TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
 Rust (.rs), Python (.py), Dart (.dart).
 
 Options:
@@ -72,13 +72,14 @@ Arguments:
                     path contains this text are analyzed.
 
 With no paths, source files under the project root are analyzed. Directories
-named {_SKIPPED_DIRS} are skipped, as are {_TEST_PATTERNS}.
+named {_SKIPPED_DIRS} are skipped, as are test source sets such as
+commonTest, jvmTest and testFixtures, and {_TEST_PATTERNS}.
 Generated Dart files ({_DART_GENERATED}) are not sources.
 
 Coverage, when it is produced:
   Clojure      clj -M:cov --lcov, then Cloverage form counts or LCOV
-  Java         Maven JaCoCo instruction coverage, for each pom.xml module
-  Kotlin       Maven JaCoCo, as Java; lambdas count toward their function
+  Java/Kotlin  Maven or Gradle JaCoCo instruction coverage, for each pom.xml
+               or build.gradle module
   Go           go test ./... -coverprofile=...
   TypeScript   npm run coverage, Vitest's own LCOV, or c8 around npm test
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
