@@ -466,3 +466,10 @@ def test_main_exits_with_the_status(monkeypatch):
         assert exc.code == 4
     else:
         raise AssertionError("main did not exit")
+
+
+def test_a_claude_worktree_is_a_copy_of_the_project_not_a_source(tmp_path):
+    _write(tmp_path, "src/main/kotlin/demo/B.kt", "class B\n")
+    _write(tmp_path, ".claude/worktrees/x/src/main/kotlin/demo/A.kt", "class A\n")
+    found = iter_source_files([tmp_path])
+    assert [path.name for path in found] == ["B.kt"]

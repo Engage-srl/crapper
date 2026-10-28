@@ -44,6 +44,7 @@ SKIP_DIRS = {
     "__pycache__",
     ".clj-kondo",
     ".dart_tool",
+    ".claude",
 }
 
 TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__"}
