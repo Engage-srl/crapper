@@ -2,7 +2,8 @@
 
 Every `fun` with a body is an entry: top-level, member, extension, and inside
 `object` / `companion object`. Local functions and lambdas stay inside the
-enclosing function. Secondary constructors and `init` blocks are omitted, as
+enclosing function. A custom property accessor is an entry under its JVM
+name (`getSize`, `setLabel`). Secondary constructors and `init` blocks are omitted, as
 Java omits constructors.
 
 `:namespace` is the class JaCoCo reports, written with dots
@@ -38,6 +39,8 @@ _CONTAINERS = _TYPES | {
     "ERROR",
 }
 _OWNED_ELSEWHERE = _TYPES | {"class_body", "enum_class_body", "object_literal"}
+_IS_PROPERTY = re.compile(r"is[^a-z]")
+_ACCESSORS = {"getter", "setter"}
 _DECISIONS = {
     "if_expression",
     "for_statement",
@@ -137,6 +140,17 @@ def _type_chain(data: bytes, node) -> tuple[list[str], list[str]]:
     return names, binary
 
 
+def _owning_property(node):
+    """An accessor on its own line parses as a sibling after its property."""
+
+    if node.parent.type == "property_declaration":
+        return node.parent
+    current = node.prev_named_sibling
+    while current is not None and current.type in _ACCESSORS:
+        current = current.prev_named_sibling
+    return current if current is not None and current.type == "property_declaration" else None
+
+
 def _qualify(package: str | None, names: list[str], nested: str) -> str:
     body = nested.join(names)
     return f"{package}.{body}" if package else body
@@ -165,12 +179,12 @@ class _Reader:
         return _qualify(self.package, names, "."), _qualify(self.package, binary, "$")
 
     def function(self, node) -> Function | None:
-        ident = child_of_type(node, "simple_identifier")
-        if ident is None or child_of_type(node, "function_body") is None:
+        name = self.name(node)
+        if name is None or child_of_type(node, "function_body") is None:
             return None
         namespace, jacoco_class = self.classes(node)
         return Function(
-            name=node_text(self.data, ident),
+            name=name,
             namespace=namespace,
             complexity=complexity(node, _is_decision, _skip),
             start_line=start_line(node),
@@ -182,17 +196,39 @@ class _Reader:
             end_byte=node.end_byte,
         )
 
+    def name(self, node) -> str | None:
+        if node.type in _ACCESSORS:
+            return self.accessor_name(node)
+        ident = child_of_type(node, "simple_identifier")
+        return node_text(self.data, ident) if ident is not None else None
+
+    def accessor_name(self, node) -> str | None:
+        """The JVM name of a custom accessor: `getSize`, `setLabel`, `isOpen` / `setOpen`."""
+
+        owner = _owning_property(node)
+        declaration = child_of_type(owner, "variable_declaration") if owner else None
+        ident = child_of_type(declaration, "simple_identifier") if declaration else None
+        if ident is None:
+            return None
+        prop = node_text(self.data, ident)
+        if _IS_PROPERTY.match(prop):
+            return prop if node.type == "getter" else "set" + prop[2:]
+        prefix = "get" if node.type == "getter" else "set"
+        return prefix + prop[:1].upper() + prop[1:]
+
     def functions(self) -> list[Function]:
         found: list[Function] = []
         stack = [self.tree.root_node]
         while stack:
             node = stack.pop()
-            if node.type == "function_declaration":
+            if node.type in {"function_declaration"} | _ACCESSORS:
                 function = self.function(node)
                 if function is not None:
                     found.append(function)
             elif node.type in _CONTAINERS:
                 stack.extend(reversed(node.children))
+            elif node.type == "property_declaration":
+                stack.extend(child for child in reversed(node.children) if child.type in _ACCESSORS)
         return found
 
 
