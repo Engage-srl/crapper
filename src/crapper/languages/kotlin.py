@@ -94,7 +94,9 @@ def file_class(path: str, source: str) -> tuple[str, str]:
 def _type_name(data: bytes, node) -> str:
     ident = child_of_type(node, "type_identifier")
     if ident is not None:
-        return node_text(data, ident)
+        # The JVM name drops the backticks. A `$` inside them stays a `$`: it
+        # is part of the name, not a nesting step, so it is not turned into `.`.
+        return node_text(data, ident).strip("`")
     return "Companion"
 
 

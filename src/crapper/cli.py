@@ -67,7 +67,8 @@ Arguments:
                     path contains this text are analyzed.
 
 With no paths, source files under the project root are analyzed. Directories
-named {_SKIPPED_DIRS} are skipped, as are {_TEST_PATTERNS}.
+named {_SKIPPED_DIRS} are skipped, as are test source sets such as
+commonTest, jvmTest and testFixtures, and {_TEST_PATTERNS}.
 
 Coverage, when it is produced:
   Clojure      clj -M:cov --lcov, then Cloverage form counts or LCOV

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from crapper.cli import GitError, _changed_files, _positionals, _take, main, parse_args, run
-from crapper.discover import is_test_file, language_of
+from crapper.discover import is_test_file, iter_source_files, language_of
 
 
 def test_language_detection():
@@ -52,6 +52,52 @@ def _git_status(root: Path, status: str):
         return _Completed(0, status)
 
     return fake
+
+
+TEST_SOURCE_SETS = [
+    "src/commonTest/kotlin/demo/A.kt",
+    "src/jvmTest/kotlin/demo/A.kt",
+    "src/jsTest/kotlin/demo/A.kt",
+    "src/wasmJsTest/kotlin/demo/A.kt",
+    "src/jvmAndAndroidTest/kotlin/demo/A.kt",
+    "src/androidUnitTest/kotlin/demo/A.kt",
+    "src/androidInstrumentedTest/kotlin/demo/A.kt",
+    "src/functionalTest/kotlin/demo/A.kt",
+    "src/integrationTest/java/demo/A.java",
+    "src/browserIdentityTest/kotlin/demo/A.kt",
+    "src/migratedOldTests/kotlin/demo/A.kt",
+    "src/testFixtures/kotlin/demo/A.kt",
+    "src/testDebug/java/demo/A.java",
+    "compiler/testData/codegen/box/A.kt",
+    "core/commonTest/src/demo/A.kt",
+    "core/jvmTest/src/demo/A.kt",
+    "integration-test/src/commonTest/kotlin/demo/A.kt",
+]
+
+STILL_SOURCE = [
+    "src/main/kotlin/demo/A.kt",
+    "src/commonMain/kotlin/demo/A.kt",
+    "src/jvmMain/kotlin/okio/testing/A.kt",
+    "okio-testing-support/src/commonMain/kotlin/okio/A.kt",
+    "integration-test/src/commonMain/kotlin/demo/A.kt",
+    "kotlinx-coroutines-test/common/src/A.kt",
+    "src/main/kotlin/demo/latest/A.kt",
+    "src/main/kotlin/demo/Contest.kt",
+]
+
+
+@pytest.mark.parametrize("relative", TEST_SOURCE_SETS)
+def test_gradle_and_multiplatform_test_source_sets_are_tests(tmp_path, relative):
+    _write(tmp_path, relative, "class A\n")
+    assert is_test_file(relative) is True
+    assert iter_source_files([tmp_path]) == []
+
+
+@pytest.mark.parametrize("relative", STILL_SOURCE)
+def test_main_source_sets_and_testing_libraries_are_still_source(tmp_path, relative):
+    _write(tmp_path, relative, "class A\n")
+    assert is_test_file(relative) is False
+    assert iter_source_files([tmp_path]) == [(tmp_path / relative).resolve()]
 
 
 def test_project_snapshot_is_readable_as_crap4clj_edn(tmp_path):

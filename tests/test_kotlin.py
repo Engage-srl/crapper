@@ -1,3 +1,4 @@
+from crapper.coverage import CoverageBundle, parse_jacoco_index
 from crapper.languages.kotlin import file_class, functions_in_source
 
 SCORE = """
@@ -214,3 +215,54 @@ def test_a_guard_with_and_counts_the_guard_and_the_and():
     plain = "fun pick(v: Any, a: Boolean, b: Boolean) = when (v) { is String -> 1; else -> 0 }\n"
     guarded = "fun pick(v: Any, a: Boolean, b: Boolean) = when (v) { is String if a && b -> 1; else -> 0 }\n"
     assert _complexity(guarded) == _complexity(plain) + 2
+
+
+BACKTICKS = """
+package okio
+
+object `-DeprecatedOkio` {
+    fun buffer(x: Int) = x + 1
+}
+
+class Plain {
+    class `with space` {
+        fun inside() = 2
+    }
+}
+
+internal class `Outer$WithDate$DefaultImpls` {
+    companion object {
+        fun date() = 3
+    }
+}
+"""
+
+
+def test_backticked_type_names_follow_the_classes_jacoco_reports():
+    functions = functions_in_source(BACKTICKS, "src/okio/-DeprecatedOkio.kt")
+    assert [(f.namespace, f.name, f.jacoco_class) for f in functions] == [
+        ("okio.-DeprecatedOkio", "buffer", "okio.-DeprecatedOkio"),
+        ("okio.Plain.with space", "inside", "okio.Plain$with space"),
+        (
+            "okio.Outer$WithDate$DefaultImpls.Companion",
+            "date",
+            "okio.Outer$WithDate$DefaultImpls$Companion",
+        ),
+    ]
+
+
+def test_a_backticked_object_joins_its_jacoco_class():
+    xml = """<?xml version="1.0"?>
+<report>
+  <package name="okio">
+    <class name="okio/-DeprecatedOkio">
+      <method name="buffer" desc="(I)I" line="5">
+        <counter type="INSTRUCTION" missed="1" covered="3"/>
+      </method>
+    </class>
+  </package>
+</report>
+"""
+    buffer = functions_in_source(BACKTICKS, "src/okio/-DeprecatedOkio.kt")[0]
+    bundle = CoverageBundle(jacoco=parse_jacoco_index(xml))
+    assert bundle.percent_for(buffer) == 75.0
