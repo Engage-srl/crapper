@@ -266,3 +266,46 @@ def test_a_backticked_object_joins_its_jacoco_class():
     buffer = functions_in_source(BACKTICKS, "src/okio/-DeprecatedOkio.kt")[0]
     bundle = CoverageBundle(jacoco=parse_jacoco_index(xml))
     assert bundle.percent_for(buffer) == 75.0
+
+
+ACCESSORS = """
+package a
+
+class Box(val full: Boolean) {
+    val size: Int
+        get() {
+            return if (full) 1 else 0
+        }
+
+    var label: String = ""
+        set(value) {
+            field = value
+        }
+
+    val plain = 1
+}
+"""
+
+
+def test_custom_accessors_are_functions():
+    assert _rows(ACCESSORS, "src/a/Box.kt") == [("a.Box", "getSize", 2), ("a.Box", "setLabel", 1)]
+
+
+def test_is_properties_keep_their_jvm_accessor_names():
+    source = """
+package a
+
+class Door {
+    var isOpen: Boolean = false
+        get() = field
+        set(value) {
+            field = value
+        }
+}
+"""
+    assert [name for _, name, _ in _rows(source, "src/a/Door.kt")] == ["isOpen", "setOpen"]
+
+
+def test_a_top_level_accessor_lives_in_the_file_class():
+    source = "package a\n\nval size: Int\n    get() = 1\n"
+    assert _rows(source, "src/a/Util.kt") == [("a.UtilKt", "getSize", 1)]
