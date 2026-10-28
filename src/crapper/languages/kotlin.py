@@ -45,6 +45,7 @@ _DECISIONS = {
     "do_while_statement",
     "catch_block",
     "when_entry",
+    "guard_condition",
     "conjunction_expression",
     "disjunction_expression",
     "elvis_expression",

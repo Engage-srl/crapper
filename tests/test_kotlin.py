@@ -176,3 +176,41 @@ def test_a_file_with_parse_errors_warns(capsys):
     assert capsys.readouterr().err == (
         "src/Broken.kt: Kotlin parse error; scores in this file may be wrong.\n"
     )
+
+
+GUARDS = """
+package demo
+
+sealed interface Shape {
+    data class Circle(val r: Double) : Shape
+    data class Rect(val w: Double, val h: Double) : Shape
+    data object Empty : Shape
+}
+
+fun label(s: Shape): String = when (s) {
+    is Shape.Circle if s.r > 10.0 -> "big circle"
+    is Shape.Circle -> "circle"
+    is Shape.Rect if s.w == s.h -> "square"
+    is Shape.Rect -> "rect"
+    Shape.Empty -> "empty"
+}
+"""
+
+
+def _complexity(source: str) -> int:
+    [function] = functions_in_source(source, "src/main/kotlin/demo/Guards.kt")
+    return function.complexity
+
+
+def test_a_when_guard_is_a_second_decision_on_its_branch():
+    [function] = functions_in_source(GUARDS, "src/main/kotlin/demo/Shapes.kt")
+    assert (function.name, function.complexity) == ("label", 8)
+    plain = "fun pick(x: Int) = when (x) { 1 -> 1; 2 -> 2; else -> 3 }\n"
+    guarded = "fun pick(x: Int) = when (x) { 1 if x > 0 -> 1; 2 -> 2; else -> 3 }\n"
+    assert _complexity(guarded) == _complexity(plain) + 1
+
+
+def test_a_guard_with_and_counts_the_guard_and_the_and():
+    plain = "fun pick(v: Any, a: Boolean, b: Boolean) = when (v) { is String -> 1; else -> 0 }\n"
+    guarded = "fun pick(v: Any, a: Boolean, b: Boolean) = when (v) { is String if a && b -> 1; else -> 0 }\n"
+    assert _complexity(guarded) == _complexity(plain) + 2
